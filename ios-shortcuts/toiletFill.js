@@ -45,9 +45,10 @@ async function post(payload, sid) {
   const req = new Request(EP, {
     method: "POST", headers: headers(sid), body: JSON.stringify(payload),
   });
+  try { req.timeoutInterval = 25; } catch (e) {}
   let text = "";
   try { text = await req.loadString(); }
-  catch (e) { throw new Error("网络请求失败: " + e); }
+  catch (e) { throw new Error("网络请求失败（25秒超时或连接失败）: " + e); }
   const respHeaders = req.response ? req.response.headers : {};
   const newSid = respHeaders["Mcp-Session-Id"] || respHeaders["mcp-session-id"] || sid || null;
   // 兼容 JSON 与 SSE 两种响应
@@ -173,6 +174,7 @@ async function authFlow() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ code: code }),
       });
+      try { req.timeoutInterval = 20; } catch (e) {}
       const text = await req.loadString();   // HTTP 4xx/5xx 也返回内容，不抛异常
       lastRaw = (text || "").slice(0, 300);
       const m = (text || "").match(/"token"\s*:\s*"([^"]+)"/);
