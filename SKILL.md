@@ -64,8 +64,22 @@ python3 <skill目录>/scripts/fill_record.py \
 
 来源优先级：`--token` 参数 > 环境变量 `KDOCS_TOKEN` > 脚本同目录 `.token` 文件（第一行纯 Token）。
 
-获取：浏览器登录 https://www.kdocs.cn/latest → 右上角头像旁主菜单 → 「龙虾专属入口」→ 复制 Token。
-过期特征：接口返回 `400006`，重新获取即可（约一年有效）。
+### 获取方式一：agent 代办（推荐，无需找任何入口）
+
+授权码是客户端自己生成的随机 UUID，全程可自动化：
+
+1. agent 生成一个 UUID（如 `uuidgen` 或随机 36 位字符串），记为 CODE
+2. 拼登录链接给用户，让用户在手机浏览器点开并确认授权（手机上 WPS 一般已登录，一点就过）：
+   `https://account.wps.cn/login?cb=https%3A%2F%2Fapi.wps.cn%2Foffice%2Fv5%2Fai%2Fskill_hub%2Fusers%2Fcallback%3Fcode%3D<CODE>`
+3. agent 轮询（每 3 秒一次，最多 5 分钟）：
+   `curl -s -X POST "https://api.wps.cn/office/v5/ai/skill_hub/wps_auth/exchange" -H "Content-Type: application/json" -d '{"code":"<CODE>"}'`
+4. 响应 JSON 中 `code==200` 时取 `token` 字段，写入 `.token` 文件
+5. Token 有效期约一年；接口返回 `400006` 表示过期，重跑此流程
+
+### 获取方式二：手动复制（备用）
+
+浏览器登录 https://www.kdocs.cn/latest → 右上角头像旁主菜单 → 「龙虾专属入口」→ 复制 Token。
+（手机端网页版可能找不到该入口，优先用方式一。）
 
 ## 必须遵守的接口要点（实测踩坑，违反必翻车）
 
