@@ -96,10 +96,17 @@ async function callTool(name, args) {
 }
 
 // ---------- Token ----------
+function hasToken() {
+  try {
+    return Keychain.contains("kdocs_token") && (Keychain.get("kdocs_token") || "").length > 0;
+  } catch (e) {
+    return false;
+  }
+}
+
 function getToken() {
-  const t = Keychain.get("kdocs_token");
-  if (!t) throw new Error("未配置 Token，请先单独运行一次本脚本完成授权");
-  return t;
+  if (!hasToken()) throw new Error("未配置 Token，请先单独运行一次本脚本完成授权");
+  return Keychain.get("kdocs_token");
 }
 
 function uuid() {
@@ -298,24 +305,23 @@ async function main() {
     q = args.queryParameters;
   } catch (e) { q = {}; }
 
-  // 无参数运行 → 只做授权
+  // 先确保 Token（授权流程不需要 MCP 连接），再连接口
+  if (!hasToken()) {
+    await authFlow();
+    if (!hasToken()) return; // 用户取消授权
+  }
+
+  // 无参数运行 → 只做授权/状态检查
   if (!q || !q.date || !q.time || !q.sheet) {
-    await rpcInit();
-    const has = Keychain.contains("kdocs_token");
-    if (!has) {
-      await authFlow();
-    } else {
-      const a = new Alert();
-      a.title = "toiletFill";
-      a.message = "Token 已配置（" + CONFIG.writeTarget + " 模式）。请通过快捷指令调用。";
-      a.addAction("好");
-      await a.present();
-    }
+    const a = new Alert();
+    a.title = "toiletFill";
+    a.message = "✅ Token 已配置（" + CONFIG.writeTarget + " 模式）。请通过快捷指令调用。";
+    a.addAction("好");
+    await a.present();
     return;
   }
 
   await rpcInit();
-  if (!Keychain.contains("kdocs_token")) await authFlow();
 
   const { date, time, sheet } = q;
   const slot = slotFromTime(time);
