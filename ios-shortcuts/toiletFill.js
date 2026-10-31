@@ -340,6 +340,45 @@ async function insertPicture(fileId, wid, row, col, oid, width, height) {
   throw new Error("图片插入未持久化（重试3次）");
 }
 
+// ---------- 网络诊断 ----------
+async function probe(url, expectCode) {
+  const start = Date.now();
+  const req = new Request(url);
+  try { req.timeoutInterval = 15; } catch (e) {}
+  try {
+    await req.loadString();
+    const code = req.response ? req.response.statusCode : "?";
+    const ms = Date.now() - start;
+    const mark = String(code) === String(expectCode) ? "✅" : "⚠️";
+    return mark + " HTTP " + code + "（" + ms + "ms）";
+  } catch (e) {
+    return "❌ " + String(e).slice(0, 60) + "（" + (Date.now() - start) + "ms）";
+  }
+}
+
+async function diagnose() {
+  const lines = [];
+  lines.push("1) 基础网络 www.wps.cn: " + await probe("https://www.wps.cn/", 200));
+  lines.push("2) 接口域名 GET(404属正常): " + await probe("https://mcp-center.wps.cn/", 404));
+  try {
+    mcpSid = null;
+    await rpcInit();
+    lines.push("3) MCP initialize: ✅ 会话已建立" +
+      (mcpSid ? "" : "（⚠️ 未取到会话ID，后续调用会失败！）"));
+  } catch (e) {
+    lines.push("3) MCP initialize: ❌ " + String(e && e.message ? e.message : e).slice(0, 120));
+    return lines.join("\n") + "\n\n→ 第2步超时=手机网络到接口不通\n→ 第3步失败但第2步通=会话/协议问题";
+  }
+  try {
+    await callTool("search_files",
+      { keyword: CONFIG.fileKeyword, type: "file_name", page_size: 3 });
+    lines.push("4) API调用(带Token): ✅");
+  } catch (e) {
+    lines.push("4) API调用(带Token): ❌ " + String(e && e.message ? e.message : e).slice(0, 120));
+  }
+  return lines.join("\n");
+}
+
 // ---------- 主流程 ----------
 async function main() {
   let q;
@@ -347,7 +386,7 @@ async function main() {
     q = args.queryParameters;
   } catch (e) { q = {}; }
 
-  // 无参数运行 → 设置菜单（测试/重配/清除 Token）
+  // 无参数运行 → 设置菜单（诊断/测试/重配/清除 Token）
   if (!q || !q.date || !q.time || !q.sheet) {
     while (true) {
       const a = new Alert();
@@ -355,12 +394,23 @@ async function main() {
       a.message = "模式=" + CONFIG.writeTarget + "（" +
         (CONFIG.writeTarget === "official" ? "正式表" : "测试[副本]") + "）\n" +
         "Token: " + (hasToken() ? "已配置" : "未配置");
+      a.addAction("🩺 网络诊断");
       if (hasToken()) a.addAction("🔍 测试 Token（连接接口）");
       a.addAction("🔑 重新配置 Token");
       if (hasToken()) a.addAction("🗑 清除 Token");
       a.addAction("退出");
       const pick = await a.present();
-      if (hasToken() && pick === 0) {
+      const hasT = hasToken();
+      if (pick === 0) {
+        const report = await diagnose();
+        const d = new Alert();
+        d.title = "🩺 诊断报告";
+        d.message = report;
+        d.addAction("复制报告");
+        d.addAction("好");
+        const di = await d.present();
+        if (di === 0) Pasteboard.copy(report);
+      } else if (hasT && pick === 1) {
         try {
           await rpcInit();
           await callTool("search_files",
@@ -373,13 +423,13 @@ async function main() {
           const bad = new Alert();
           bad.title = "❌ 连接失败";
           bad.message = String(e && e.message ? e.message : e).slice(0, 300) +
-            "\n\n如果是鉴权问题，请「重新配置 Token」。";
+            "\n\n如果是鉴权问题，请「重新配置 Token」。\n或先选「🩺 网络诊断」定位。";
           bad.addAction("好");
           await bad.present();
         }
-      } else if ((hasToken() && pick === 1) || (!hasToken() && pick === 0)) {
+      } else if ((hasT && pick === 2) || (!hasT && pick === 1)) {
         await authFlow();   // 会先尝试剪贴板导入
-      } else if (hasToken() && pick === 2) {
+      } else if (hasT && pick === 3) {
         Keychain.remove("kdocs_token");
         const c = new Alert();
         c.title = "已清除";
