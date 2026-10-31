@@ -117,12 +117,32 @@ function uuid() {
 }
 
 async function authFlow() {
+  // 先给最快路径：从剪贴板导入（电脑上复制好的 Token 发到手机后复制）
+  const clip = Pasteboard.get() || "";
+  const clipTok = clip.replace(/^bearer\s+/i, "").trim();
+  if (clipTok.length > 50) {
+    const imp = new Alert();
+    imp.title = "检测到剪贴板疑似 Token";
+    imp.message = "长度 " + clipTok.length + " 字符。是否导入为金山文档 Token？";
+    imp.addAction("✅ 导入");
+    imp.addAction("不用，走在线授权");
+    const pick = await imp.present();
+    if (pick === 0) {
+      Keychain.set("kdocs_token", clipTok);
+      const ok = new Alert();
+      ok.title = "✅ Token 已保存（剪贴板导入）";
+      ok.message = "试试运行快捷指令；若接口报鉴权失败(400006)再走在线授权。";
+      await ok.present();
+      return true;
+    }
+  }
+
   const code = uuid();
   const loginUrl = "https://account.wps.cn/login?cb=" +
     encodeURIComponent("https://api.wps.cn/office/v5/ai/skill_hub/users/callback?code=" + code);
 
   const alert = new Alert();
-  alert.title = "WPS 授权（二选一）";
+  alert.title = "WPS 在线授权";
   alert.message = "方式一：复制链接到电脑浏览器打开并登录授权\n方式二：直接在本机打开授权页\n\n授权后回到这里等待（5分钟内有效）\n\n" + loginUrl;
   alert.addAction("📋 复制链接");
   alert.addAction("📱 本机打开授权页");
@@ -324,20 +344,55 @@ async function main() {
     q = args.queryParameters;
   } catch (e) { q = {}; }
 
-  // 先确保 Token（授权流程不需要 MCP 连接），再连接口
+  // 无参数运行 → 设置菜单（测试/重配/清除 Token）
+  if (!q || !q.date || !q.time || !q.sheet) {
+    while (true) {
+      const a = new Alert();
+      a.title = "toiletFill 设置";
+      a.message = "模式=" + CONFIG.writeTarget + "（" +
+        (CONFIG.writeTarget === "official" ? "正式表" : "测试[副本]") + "）\n" +
+        "Token: " + (hasToken() ? "已配置" : "未配置");
+      if (hasToken()) a.addAction("🔍 测试 Token（连接接口）");
+      a.addAction("🔑 重新配置 Token");
+      if (hasToken()) a.addAction("🗑 清除 Token");
+      a.addAction("退出");
+      const pick = await a.present();
+      if (hasToken() && pick === 0) {
+        try {
+          await rpcInit();
+          await callTool("search_files",
+            { keyword: CONFIG.fileKeyword, type: "file_name", page_size: 3 });
+          const ok = new Alert();
+          ok.title = "✅ Token 有效";
+          ok.message = "接口连接正常，可以跑快捷指令了。";
+          await ok.present();
+        } catch (e) {
+          const bad = new Alert();
+          bad.title = "❌ 连接失败";
+          bad.message = String(e && e.message ? e.message : e).slice(0, 300) +
+            "\n\n如果是鉴权问题，请「重新配置 Token」。";
+          bad.addAction("好");
+          await bad.present();
+        }
+      } else if ((hasToken() && pick === 1) || (!hasToken() && pick === 0)) {
+        await authFlow();   // 会先尝试剪贴板导入
+      } else if (hasToken() && pick === 2) {
+        Keychain.remove("kdocs_token");
+        const c = new Alert();
+        c.title = "已清除";
+        c.message = "Token 已从 Keychain 移除。";
+        c.addAction("好");
+        await c.present();
+      } else {
+        return;
+      }
+    }
+  }
+
+  // 快捷指令调用：确保 Token 后连接口
   if (!hasToken()) {
     await authFlow();
     if (!hasToken()) return; // 用户取消授权
-  }
-
-  // 无参数运行 → 只做授权/状态检查
-  if (!q || !q.date || !q.time || !q.sheet) {
-    const a = new Alert();
-    a.title = "toiletFill";
-    a.message = "✅ Token 已配置（" + CONFIG.writeTarget + " 模式）。请通过快捷指令调用。";
-    a.addAction("好");
-    await a.present();
-    return;
   }
 
   await rpcInit();
