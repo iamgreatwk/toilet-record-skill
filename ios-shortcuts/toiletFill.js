@@ -120,15 +120,28 @@ async function authFlow() {
   const code = uuid();
   const loginUrl = "https://account.wps.cn/login?cb=" +
     encodeURIComponent("https://api.wps.cn/office/v5/ai/skill_hub/users/callback?code=" + code);
+
   const alert = new Alert();
-  alert.title = "WPS 授权";
-  alert.message = "点击「打开授权页」后，在浏览器登录/确认，然后回到这里等待。\n（约一年有效）";
-  alert.addAction("打开授权页");
+  alert.title = "WPS 授权（二选一）";
+  alert.message = "方式一：复制链接到电脑浏览器打开并登录授权\n方式二：直接在本机打开授权页\n\n授权后回到这里等待（5分钟内有效）\n\n" + loginUrl;
+  alert.addAction("📋 复制链接");
+  alert.addAction("📱 本机打开授权页");
   alert.addAction("取消");
   const idx = await alert.present();
-  if (idx !== 0) return false;
-  Safari.openInApp(loginUrl, false); // 用 App 内浏览器，返回方便
-  // 轮询 exchange
+  if (idx === 0) {
+    Pasteboard.copy(loginUrl);
+    const tip = new Alert();
+    tip.title = "链接已复制";
+    tip.message = "粘贴到电脑浏览器打开，登录 WPS 并确认授权。\n完成后回到这里点「好」开始等待。";
+    tip.addAction("好，开始等待");
+    await tip.present();
+  } else if (idx === 1) {
+    Safari.openInApp(loginUrl, false);
+  } else {
+    return false;
+  }
+
+  // 轮询 exchange（无论在哪台设备授权，服务端凭 code 发 Token）
   for (let i = 0; i < 100; i++) {
     await sleep(3000);
     try {
