@@ -118,8 +118,9 @@ function uuid() {
 
 async function authFlow() {
   // 先给最快路径：从剪贴板导入（电脑上复制好的 Token 发到手机后复制）
-  const clip = Pasteboard.get() || "";
-  const clipTok = clip.replace(/^bearer\s+/i, "").trim();
+  let clip = "";
+  try { clip = Pasteboard.paste() || ""; } catch (e) { clip = ""; }
+  const clipTok = String(clip).replace(/^bearer\s+/i, "").trim();
   if (clipTok.length > 50) {
     const imp = new Alert();
     imp.title = "检测到剪贴板疑似 Token";
