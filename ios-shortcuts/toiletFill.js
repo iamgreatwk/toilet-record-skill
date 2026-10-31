@@ -356,10 +356,38 @@ async function probe(url, expectCode) {
   }
 }
 
+async function probePost(label, hdrs) {
+  const start = Date.now();
+  try {
+    const req = new Request(EP, {
+      method: "POST", headers: hdrs,
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize",
+        params: { protocolVersion: "2024-11-05", capabilities: {},
+                  clientInfo: { name: "probe", version: "1.0" } } }),
+    });
+    try { req.timeoutInterval = 12; } catch (e) {}
+    await req.loadString();
+    const code = req.response ? req.response.statusCode : "?";
+    return label + ": ✅ HTTP " + code + "（" + (Date.now() - start) + "ms）";
+  } catch (e) {
+    return label + ": ❌ " + String(e).slice(0, 50) + "（" + (Date.now() - start) + "ms）";
+  }
+}
+
 async function diagnose() {
   const lines = [];
   lines.push("1) 基础网络 www.wps.cn: " + await probe("https://www.wps.cn/", 200));
   lines.push("2) 接口域名 GET(404属正常): " + await probe("https://mcp-center.wps.cn/", 404));
+  // POST 探针矩阵：定位是哪个请求头触发挂起
+  lines.push("2b) POST 仅Content-Type: " + await probePost(
+    "", { "Content-Type": "application/json" }));
+  lines.push("2c) POST +Authorization: " + await probePost(
+    "", { "Content-Type": "application/json",
+          "Authorization": "Bearer " + getToken() }));
+  lines.push("2d) POST +Accept(SSE): " + await probePost(
+    "", { "Content-Type": "application/json",
+          "Authorization": "Bearer " + getToken(),
+          "Accept": "application/json, text/event-stream" }));
   try {
     mcpSid = null;
     await rpcInit();
