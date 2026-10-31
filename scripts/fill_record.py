@@ -35,7 +35,11 @@ def slot_from_time(time_str):
     return 3
 
 
-def resolve_file(m, file_id=None):
+def resolve_file(m, file_id=None, file_name=None):
+    """定位表格文件。
+    - file_id 直接指定
+    - file_name 指定名称（不含 .xlsx）：优先精确匹配，其次不含[副本]的同名文件
+    - 都不传：默认优先 [副本]（测试用）"""
     if file_id:
         return file_id
     inner = m.call("search_files", {"keyword": FILE_KEYWORD, "type": "file_name",
@@ -48,7 +52,22 @@ def resolve_file(m, file_id=None):
             cands.append(f)
     if not cands:
         raise RuntimeError("云盘中未找到厕所巡查记录表，请确认文件名")
-    # 优先 [副本]
+    if file_name:
+        want = file_name.strip()
+        # 1) 精确同名（含 .xlsx）
+        for f in cands:
+            if f["name"] == want + ".xlsx":
+                return f["id"]
+        # 2) 同名但不含[副本]
+        for f in cands:
+            if f["name"].replace(".xlsx", "") == want:
+                return f["id"]
+        # 3) 含关键词且不含[副本]
+        for f in cands:
+            if "[副本]" not in f["name"]:
+                return f["id"]
+        raise RuntimeError(f"未找到名为「{want}」的正式表格")
+    # 默认：优先 [副本]（测试用）
     for f in cands:
         if "[副本]" in f["name"]:
             return f["id"]
@@ -103,6 +122,8 @@ def main():
     ap.add_argument("--status", default=DEFAULT_STATUS, help="情况说明")
     ap.add_argument("--cleared", default=DEFAULT_CLEARED, help="是否已清除")
     ap.add_argument("--file-id", default=None, help="直接指定表格 file_id（跳过搜索）")
+    ap.add_argument("--file-name", default=None,
+                    help="表格文件名（不含.xlsx）。正式使用传：厕所巡查记录表；不传默认用[副本]")
     ap.add_argument("--token", default=None, help="金山文档 Token")
     ap.add_argument("--dry-run", action="store_true", help="只定位，不写入")
     args = ap.parse_args()
@@ -110,7 +131,7 @@ def main():
     m = KDocsMCP(load_token(args.token))
     m.init()
 
-    file_id = resolve_file(m, args.file_id)
+    file_id = resolve_file(m, args.file_id, args.file_name)
     wid, real_name = resolve_sheet(m, file_id, args.sheet)
     slot = slot_from_time(args.time)
     row = locate_row(m, file_id, wid, args.date, slot, args.dry_run)
