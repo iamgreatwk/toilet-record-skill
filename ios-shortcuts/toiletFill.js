@@ -142,6 +142,8 @@ async function authFlow() {
   }
 
   // 轮询 exchange（无论在哪台设备授权，服务端凭 code 发 Token）
+  // 用 loadString + 全文正则搜 token：兼容任意嵌套结构，HTTP 错误也不再静默吞掉
+  let lastRaw = "";
   for (let i = 0; i < 100; i++) {
     await sleep(3000);
     try {
@@ -150,18 +152,22 @@ async function authFlow() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ code: code }),
       });
-      const resp = await req.loadJSON();
-      if (resp && resp.code === 200 && resp.token) {
-        Keychain.set("kdocs_token", resp.token);
+      const text = await req.loadString();   // HTTP 4xx/5xx 也返回内容，不抛异常
+      lastRaw = (text || "").slice(0, 300);
+      const m = (text || "").match(/"token"\s*:\s*"([^"]+)"/);
+      if (m && m[1]) {
+        Keychain.set("kdocs_token", m[1]);
         const ok = new Alert();
         ok.title = "✅ Token 已保存";
         ok.message = "有效期约一年。下次直接运行快捷指令即可。";
         await ok.present();
         return true;
       }
-    } catch (e) { /* 继续轮询 */ }
+    } catch (e) {
+      lastRaw = "EXC: " + String(e).slice(0, 200);
+    }
   }
-  throw new Error("授权超时（5分钟），请重试");
+  throw new Error("授权超时（5分钟）。最后响应: " + lastRaw);
 }
 
 function sleep(ms) {
