@@ -15,34 +15,52 @@ ENDPOINT = "https://mcp-center.wps.cn/skill_hub/mcp"
 
 
 def load_token(explicit=None, script_dir=None):
+    """返回标准化 Token（剥掉可能存在的 Bearer 前缀，发送时统一加）。
+    兼容两种存量格式：裸 Token（手机端 exchange 接口返回）和
+    "Bearer <token>"（PC 端 mcporter 配置迁移）。"""
     if explicit:
-        return explicit.strip()
-    env = os.environ.get("KDOCS_TOKEN")
-    if env:
-        return env.strip()
-    if script_dir is None:
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-    token_file = os.path.join(script_dir, ".token")
-    if os.path.exists(token_file):
-        with open(token_file, encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if line and not line.startswith("#"):
-                    return line
-    print("错误：未找到 Token。请将 Token 写入脚本同目录 .token 文件，"
-          "或设置环境变量 KDOCS_TOKEN，或用 --token 传入。", file=sys.stderr)
-    sys.exit(2)
+        tok = explicit.strip()
+    else:
+        env = os.environ.get("KDOCS_TOKEN")
+        if env:
+            tok = env.strip()
+        else:
+            if script_dir is None:
+                script_dir = os.path.dirname(os.path.abspath(__file__))
+            token_file = os.path.join(script_dir, ".token")
+            if os.path.exists(token_file):
+                with open(token_file, encoding="utf-8") as f:
+                    tok = ""
+                    for line in f:
+                        line = line.strip()
+                        if line and not line.startswith("#"):
+                            tok = line
+                            break
+            else:
+                print("错误：未找到 Token。请将 Token 写入脚本同目录 .token 文件，"
+                      "或设置环境变量 KDOCS_TOKEN，或用 --token 传入。", file=sys.stderr)
+                sys.exit(2)
+    if tok.lower().startswith("bearer "):
+        tok = tok[7:].strip()
+    if not tok:
+        print("错误：Token 为空。", file=sys.stderr)
+        sys.exit(2)
+    return tok
 
 
 class KDocsMCP:
     def __init__(self, token):
-        self.token = token
+        # 兼容裸 Token 与带 Bearer 前缀两种输入，统一剥前缀后发送时再加
+        t = token.strip()
+        if t.lower().startswith("bearer "):
+            t = t[7:].strip()
+        self.token = t
         self.sid = None
         self.next_id = 0
 
     def _post(self, payload):
         headers = {
-            "Authorization": self.token,
+            "Authorization": "Bearer " + self.token,
             "Content-Type": "application/json",
             "Accept": "application/json, text/event-stream",
         }
